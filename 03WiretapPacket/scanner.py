@@ -1,10 +1,29 @@
 import os
 import socket
 import struct
+import threading
+import time
 from _ctypes import sizeof
 from ctypes import Structure, c_uint16, c_uint32, c_uint8
 
+from netaddr import IPAddress, IPNetwork
+
 host = '192.168.1.9'
+
+subnet = '192.168.1.0/24'
+
+magic_message = b'PYTHONRULES!'
+
+
+def udp_sender(subnet, magic_message):
+    time.sleep(5)
+    sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    for ip in IPNetwork(subnet):
+        try:
+            sender.sendto(magic_message, (str(ip), 65212))
+        except:
+            pass
 
 
 class IP(Structure):
@@ -68,11 +87,14 @@ sniffer.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
 if os.name == 'nt':
     sniffer.ioctl(socket.SIO_RCVALL, socket.RCVALL_ON)
 
+t = threading.Thread(target=udp_sender, args=(subnet, magic_message))
+t.start()
+
 try:
     while True:
         raw_buffer = sniffer.recvfrom(65565)[0]
         ip_header = IP(raw_buffer[0:20])
-        print(f'Protocol: {ip_header.protocol} {ip_header.src_address} -> {ip_header.dst_address}')
+        # print(f'Protocol: {ip_header.protocol} {ip_header.src_address} -> {ip_header.dst_address}')
 
         if ip_header.protocol == 'ICMP':
             offset = ip_header.ihl * 4
@@ -80,8 +102,15 @@ try:
 
             icmp_header = ICMP(buf)
 
-            print(f'ICMP -> Type: {icmp_header.type} Code: {icmp_header.code}')
+            # print(f'ICMP -> Type: {icmp_header.type} Code: {icmp_header.code}')
+
+            if icmp_header.code == 3 and icmp_header.type == 3:
+                if IPAddress(ip_header.src_address) in IPNetwork(subnet):
+                    print(raw_buffer[len(raw_buffer) - len(magic_message):])
+                    # if raw_buffer[len(raw_buffer) - len(magic_message):] == magic_message:
+                    print(f'Host Up: {ip_header.src_address}')
 
 except KeyboardInterrupt:
+    print('shutdown')
     if os.name == 'nt':
         sniffer.ioctl(socket.SIO_RCVALL, socket.RCVALL_OFF)
